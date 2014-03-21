@@ -1,6 +1,10 @@
 package cppparser;
 
 import byte.ByteData;
+#if cppplog
+import com.furusystems.slf4hx.loggers.Logger;
+import com.furusystems.slf4hx.Logging;
+#end
 import hxparse.Parser.Parser;
 import hxparse.ParserBuilder;
 import hxparse.Position;
@@ -272,8 +276,10 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 					if (defs.length > 1) throw "Error parsing function, only one return var allowed";
 					var def = defs.length == 1 ? defs[0] : null;
 					if (def == null) throw "Error parsing class, missing function name (rogue open parenthesis)";
-					if (def.type == null) {
+					if (def.name == null) {
 						// Constructor / destructor
+						def.name = def.type;
+						def.type = null;
 						if (destructor) def.name = destructorName;
 						if (cl.name != def.name) throw "Error parsing class, function missing specifiers or wrong constructor name: "+def.name;
 						var fn = parseFunction(def.name);
