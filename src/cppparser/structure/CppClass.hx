@@ -8,7 +8,7 @@ class CppClass {
 	public var idents:Array<Token> = [];
 	public var name:String;
 	
-	public var inheritance: { visibility:Visibility, name:String };
+	public var inheritance:Null<{ visibility:Visibility, name:String }>;
 	
 	public var constructors:Array<CppFunction> = [];
 	public var destructors:Array<CppFunction> = [];

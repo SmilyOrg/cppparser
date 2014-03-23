@@ -1,5 +1,6 @@
 package cppparser;
 
+import cppparser.Data.ExprDef;
 import hxparse.Position;
 
 enum Keyword {
@@ -28,8 +29,14 @@ enum Keyword {
 	KwdProtected;
 	KwdPrivate;
 	
+	KwdStatic;
+	
 	KwdConst;
 	KwdVirtual;
+	KwdExtern;
+	
+	KwdSigned;
+	KwdUnsigned;
 	
 	KwdNew;
 }
@@ -119,6 +126,19 @@ class Token {
 	public function toString() {
 		return TokenDefPrinter.print(tok);
 	}
+}
+
+enum ExprDef {
+	EConst(c:Constant);
+	EBinop(op:Binop, a:Expr, b:Expr);
+	EParenthesis(e:Expr);
+	EUnop(op:Unop, postFix:Bool, e:Expr);
+	ECall(e:Expr, params:Array<Expr>);
+}
+
+typedef Expr = {
+	expr:ExprDef,
+	pos:Position
 }
 
 class TokenDefPrinter {

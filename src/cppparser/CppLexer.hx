@@ -61,6 +61,14 @@ class CppLexer extends Lexer implements RuleBuilder {
 		
 		// Comments
 		"//[^\n\r]*" => mk(lexer, CommentLine(lexer.current.substr(2))),
+		"/\\*" => {
+			buf = new StringBuf();
+			var pmin = lexer.curPos();
+			var pmax = try lexer.token(comment) catch (e:Eof) throw new LexerError(UnclosedComment, pmin);
+			var token = mk(lexer, Comment(buf.toString()));
+			token.pos.pmin = pmin.pmin;
+			token;
+		},
 		
 		// Unary
 		"\\+\\+" => mk(lexer,Unop(OpIncrement)),
@@ -240,6 +248,18 @@ class CppLexer extends Lexer implements RuleBuilder {
 		'[^\\\\\']+' => {
 			buf.add(lexer.current);
 			lexer.token(stringSingle);
+		}
+	];
+	
+	public static var comment = @:rule [
+		"\\*/" => lexer.curPos().pmax,
+		"\\*" => {
+			buf.add("*");
+			lexer.token(comment);
+		},
+		"[^\\*]+" => {
+			buf.add(lexer.current);
+			lexer.token(comment);
 		}
 	];
 	

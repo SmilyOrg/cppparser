@@ -25,40 +25,61 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 	// Might be useful in the future
 	var skipIdents:Map<String, Int>;
 	
-	public var macroRewrite:Map <String, Array<String> -> TokenDef>;
+	//public var directives:Array<String> = [];
+	public var initialDefines:Map<String, String>;
+	public var macroRewrite:Map<String, Array<String> -> TokenDef>;
 	
 	var currentConditionals:Array<String>;
+	var skipIf:Int = 0;
+	var insharp:Bool;
+	var insertedTokens:Array<Token>;
+	
 	public var defines:Map<String, String>;
 	public var includes:Array<String>;
 	public var typedefs:Array<String>;
 	public var enums:Array<String>;
 	public var classes:Array<CppClass>;
+	public var vars:Array<CppVar>;
+	public var functions:Array<CppFunction>;
 	
-	public function new(input:ByteData, sourceName:String = "<null>") {
-		this.input = input;
+	public function new() {
 		//this.skipIdents = skipIdents;
-		super(new CppLexer(input, sourceName), CppLexer.tok);
+		super(null, null);
 	}
 	
-	function reset() {
+	public function reset() {
 		currentConditionals = [];
+		insertedTokens = [];
+		skipIf = 0;
+		insharp = false;
 		
 		defines = new Map<String, String>();
 		includes = [];
 		typedefs = [];
 		enums = [];
 		classes = [];
+		vars = [];
+		functions = [];
 	}
 	
-	public function parse() {
+	public function parse(input:ByteData, sourceName:String) {
+		this.input = input;
+		
+		stream = new CppLexer(input, sourceName);
+		ruleset = CppLexer.tok;
+		
 		reset();
+		
+		if (initialDefines != null) for (key in initialDefines.keys()) defines.set(key, initialDefines.get(key));
+		
 		var stop = false;
 		while (!stop) {
-			if (preparse()) continue;
-			printToken(peek(0));
+			//if (preparse()) continue;
+			//printToken(peek(0));
 			switch stream {
 				case [ { tok: Kwd(KwdClass) } ]:
-					classes.push(parseClass());
+					var c = parseClass();
+					if (c != null) classes.push(c);
 				case [ { tok: Kwd(KwdTypedef) } ]:
 					var skipped = skipToSemicolon();
 					typedefs.push(skipped.join(""));
@@ -73,12 +94,25 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 					enums.push(enumName + " " + skipped.join(""));
 					if (peek(0).tok != Semicolon) throw "Unable to skip enum, semicolon after closing brace missing";
 					junk();
+				case [ { tok: Kwd(KwdExtern) } ]:
+					var skipped = skipToSemicolon();
+					trace("Skipped "+skipped.join(" "));
 				case [ { tok: Eof } ]:
 					finished();
 					break;
 				case _:
-					stop = true;
-					trace("Unimplemented: "+peek(0));
+					var defs = parseVarDefinitions(false, false, true);
+					switch stream {
+						case [ { tok: POpen } ] if (defs.length == 1):
+							var def = defs[0];
+							functions.push(parseFunction(def.name, def));
+						case [ { tok: Semicolon } ] if (defs.length > 0):
+							vars = vars.concat(defs);
+							continue;
+						case _:
+							stop = true;
+							throw "Unimplemented token: "+peek(0);
+					}
 			}
 		}
 	}
@@ -88,8 +122,8 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 	}
 	
 	function preparse() {
-		if (parsePreproc()) return true;
 		//if (checkIdentSkip()) return true;
+		if (parsePreproc()) return true;
 		if (rewriteMacros()) return true;
 		return false;
 	}
@@ -139,7 +173,7 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 						case _:
 					}
 					var result = rewriter(params);
-					if (result != null) insert(new Token(result, token.pos));
+					if (result != null) insertedTokens.push(new Token(result, token.pos));
 					return true;
 				}
 			default:
@@ -153,9 +187,27 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		}
 	}
 	
+	// Obsolete
 	function parsePreproc() {
+		if (skipIf > 0) {
+			switch stream {
+				case [ { tok: Sharp("if") }, { tok: Const(CIdent(t)) } ]:
+					skipIf++;
+				case [ { tok: Sharp("endif") } ]:
+					skipIf--;
+					if (skipIf == 0) currentConditionals.pop();
+				default: junk();
+			}
+			return true;
+		}
 		switch stream {
 			case [ { tok: Sharp("ifdef" | "ifndef") }, { tok: Const(CIdent(t)) } ]:
+				currentConditionals.push(t);
+			case [ { tok: Sharp("if") }, { tok: Const(CIdent(t)) } ]:
+				//if (directives.indexOf(t) == -1) {
+					//trace("Skipping "+t);
+					//skipIf++;
+				//}
 				currentConditionals.push(t);
 			case [ { tok: Sharp("endif") } ]:
 				currentConditionals.pop();
@@ -164,7 +216,8 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 				defines.set(k, v);
 			case [ { tok: Sharp("include") }, { tok: Const(CString(t)) } ]:
 				includes.push(t);
-			default: return false;
+			default:
+				return false;
 		}
 		return true;
 	}
@@ -200,10 +253,9 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		var len = bytes.length;
 		while (index < len) {
 			c = bytes.readByte(index);
-			index++;
 			if (c == 13 || c == 10) break;
+			index++;
 		}
-		index--;
 		return index;
 	}
 	
@@ -226,7 +278,7 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		
 		switch stream {
 			// Forward declaration
-			case [ { tok: Semicolon } ]: return cl;
+			case [ { tok: Semicolon } ]: return null;
 			case [ { tok: Colon },
 				   { tok: Kwd(kvis = KwdPublic | KwdProtected | KwdPrivate) },
 				   { tok: Const(CIdent(ident)) }
@@ -248,8 +300,8 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		var destructorName:String = "";
 		
 		while (true) {
-			if (preparse()) continue;
-			printToken(peek(0));
+			//if (preparse()) continue;
+			//printToken(peek(0));
 			//for (i in 0...10) printToken(peek(i));
 			switch stream {
 				case [ { tok: BrClose } ]:
@@ -294,8 +346,16 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 						if (operator != null) {
 							if (def.name != "operator") throw "Error parsing function, operator overload must have the name 'operator': "+def.name;
 						}
+						var castOverload = false;
+						if (def.type == "operator") {
+							var t = def.type;
+							def.type = def.name;
+							def.name = t;
+							castOverload = true;
+						}
 						var fn = parseFunction(def.name, def);
 						fn.operatorOverload = operator;
+						fn.castOverload = castOverload;
 						fn.visibility = visibility;
 						//L.info(fn);
 						cl.functions.push(fn);
@@ -346,7 +406,7 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		var dirty:Bool = true;
 		var idents:Int = 0;
 		while (true) {
-			if (preparse()) continue;
+			//if (preparse()) continue;
 			if (v == null) {
 				if (finished != null) {
 					if (idents < 2) {
@@ -377,7 +437,7 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 					switch (idents) {
 						case 0: v.type = s;
 						case 1: v.name = s;
-						default: throw "Unexpected identifier in while parsing var definition: "+s;
+						default: throw 'Unexpected identifier while parsing var definition (${v.type}, ${v.name}): $s';
 					}
 					idents++;
 				case [ { tok: Binop(OpAnd) } ]:
@@ -393,7 +453,8 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 			}
 			if (allowDefaultValues) {
 				switch stream {
-					case [ { tok: Binop(OpAssign) }, { tok: dv = Const(_) | Kwd(KwdTrue | KwdFalse) } ]:
+					case [ { tok: Binop(OpAssign) } ]:
+						var dv = parseConstantExpression();
 						if (idents != 2) throw "Can't assign default value to a nameless, typeless var: "+v;
 						v.defaultValue = dv;
 					case _:
@@ -405,11 +466,129 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		return defs.length == 1 && !dirty ? [] : defs;
 	}
 	
+	function parseConstantExpression() {
+		return expr();
+	}
+	
+	function resolveConstantExpression(e:Expr):Dynamic {
+		// TODO fix
+		return switch e.expr {
+			case EConst(CIdent("true")): true;
+			case EConst(CIdent("false")): false;
+			case EConst(CInt(s)): s;
+			case EConst(CIdent(ident)):
+				/*
+				switch (defines.get(ident)) {
+					case "1": true;
+					case "0": false;
+					case null: false;
+					case _: throw "Unsupported define: "+ident;
+				}
+				*/
+				defines.get(ident);
+			case ECall({ expr: EConst(CIdent("defined")) }, [{ expr: EConst(CIdent(ident)) }]): defines.exists(ident);
+			case EBinop(op, a, b):
+				switch op {
+					case OpBoolOr: resolveConstantExpression(a) || resolveConstantExpression(b);
+					case OpBoolAnd: resolveConstantExpression(a) && resolveConstantExpression(b);
+					case OpEq: resolveConstantExpression(a) == resolveConstantExpression(b);
+					default: throw "Unsupported binary op: "+op;
+				}
+			case EUnop(op, postFix, e):
+				switch op {
+					case OpNot: return !resolveConstantExpression(e);
+					default: throw "Unsupported unary op: "+op;
+				}
+			default: throw "Unsupported constant expression: "+e;
+		}
+	}
+	
+	function expr():Expr {
+		return switch stream {
+			case [ { tok: Unop(op), pos: p }, e = expr() ]: makeUnop(op, e, p);
+			case [ { tok: Const(c), pos: p } ]: exprNext({ expr: EConst(c), pos: p });
+			case [ { tok: Kwd(KwdTrue), pos: p } ]: exprNext({ expr: EConst(CIdent("true")), pos: p });
+			case [ { tok: Kwd(KwdFalse), pos: p } ]: exprNext({ expr: EConst(CIdent("false")), pos: p });
+			case [ { tok: POpen, pos: pa }, e = expr(), { tok: PClose, pos: pb } ]: exprNext({ expr: EParenthesis(e), pos: Position.union(pa, pb) });
+		}
+		 //| Kwd(KwdTrue | KwdFalse) | Binop(_) } :
+	}
+	
+	function exprNext(ea:Expr) {
+		return switch stream {
+			case [ { tok: Binop(op), pos: p }, eb = expr() ]:
+				makeBinop(op, ea, eb);
+			case [ { tok: POpen, pos:_ } ]:
+				switch stream {
+					case [params = parseCallParams(), { tok: PClose, pos: pb } ]:
+						exprNext({ expr: ECall(ea, params), pos: Position.union(ea.pos, pb) });
+				}
+			case _: ea;
+		}
+	}
+	
+	function parseCallParams() {
+		var ret = [];
+		switch stream {
+			case [e = expr()]: ret.push(e);
+			case _: return [];
+		}
+		while (true) {
+			switch stream {
+				case [ { tok: Comma }, e = expr() ]: ret.push(e);
+				case _: break;
+			}
+		}
+		return ret;
+	}
+	
+	static function precedence(op:Binop) {
+		var left = true;
+		var right = false;
+		return switch (op) {
+			case OpMod : {p: 0, left: left};
+			case OpMult | OpDiv : {p: 0, left: left};
+			case OpAdd | OpSub : {p: 0, left: left};
+			case OpShl | OpShr | OpUShr : {p: 0, left: left};
+			case OpOr | OpAnd | OpXor : {p: 0, left: left};
+			case OpEq | OpNotEq | OpGt | OpLt | OpGte | OpLte : {p: 0, left: left};
+			case OpBoolAnd : {p: 0, left: left};
+			case OpBoolOr : {p: 0, left: left};
+			case OpAssign | OpAssignOp(_) : { p:10, left:right };
+			case OpPreConcat: {p: 0, left: left};
+		}
+	}
+	
+	static function swap(opa:Binop, opb:Binop) {
+		var a = precedence(opa);
+		var b = precedence(opb);
+		return a.left && a.p <= b.p;
+	}
+	
+	static function makeBinop(op:Binop, ea:Expr, eb:Expr) {
+		return switch (eb.expr) {
+			case EBinop(top, tea, teb) if (swap(op, top)):
+				var te = makeBinop(op, ea, tea);
+				{ expr: EBinop(top, te, teb), pos: Position.union(tea.pos, teb.pos) };
+			case _:
+				{ expr: EBinop(op, ea, eb), pos: Position.union(ea.pos, eb.pos) };
+		}
+	}
+
+	static function makeUnop(op:Unop, e:Expr, p:Position) {
+		return switch(e.expr) {
+			case EBinop(bop, ea, eb):
+				{ expr: EBinop(bop, makeUnop(op, ea, p), eb), pos: Position.union(p, ea.pos) };
+			case _:
+				{ expr: EUnop(op, false, e), pos: Position.union(p, e.pos) };
+		}
+	}
+	
 	function parseFunctionInitList(fn:CppFunction) {
 		if (peek(0).tok != Colon) return;
 		junk();
 		while (true) {
-			printToken(peek(0));
+			//printToken(peek(0));
 			switch stream {
 				case [ { tok: Const(CIdent(name)) }, { tok: POpen } ]:
 					// TODO proper parsing for initialization contents (expression?)
@@ -503,16 +682,192 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		return token.tok;
 	}
 	
+	override function junk() {
+		if (insertedTokens.pop() == null) super.junk();
+	}
+	
+	function skipUntilEndIf() {
+		while (skipIf > 0) {
+			//trace(skipIf+" "+super.peek(0));
+			switch super.peek(0) {
+				case { tok: Sharp("if") }:
+					skipIf++;
+				case { tok: Sharp("elif") } :
+					if (skipIf == 1) {
+						skipIf = 0;
+						currentConditionals.pop();
+						break;
+					}
+				case { tok: Sharp("else") } :
+					if (skipIf == 1) {
+						skipIf = 0;
+						currentConditionals.pop();
+						currentConditionals.push("");
+					}
+				case { tok: Sharp("endif") }:
+					skipIf--;
+					if (skipIf == 0) {
+						currentConditionals.pop();
+					}
+				case { tok: Eof }:
+					throw "Eof while looking for endif at level: "+skipIf;
+				default:
+			}
+			junk();
+		}
+	}
+	
 	override function peek(n):Token {
-		return if (n == 0) {
-			var tk = super.peek(0);
-			switch tk {
+		var t;
+		
+		if (insertedTokens.length > n) {
+			t = insertedTokens[insertedTokens.length-1-n];
+		} else {
+			t = super.peek(n-insertedTokens.length);
+		}
+		printToken(t);
+		t = if (n == 0) {
+			
+			if (macroRewrite != null) {
+				switch t {
+					case { tok: Const(CIdent(ident)) }:
+						var rewriter = macroRewrite.get(ident);
+						if (rewriter != null) {
+							junk();
+							var params:Array<String> = [];
+							switch super.peek(0) {
+								case { tok: POpen } :
+									junk();
+									while (true) {
+										switch super.peek(0) {
+											case { tok: Const(c) } :
+												junk();
+												params.push(getConstantString(c));
+												switch super.peek(0) {
+													case { tok: Comma }: junk();
+													case { tok: PClose }: junk(); break;
+													default: throw "Invalud value parsing macro rewrite params: "+super.peek(0);
+												}
+											default: throw "Invalid value parsing macro rewrite params: "+super.peek(0);
+										}
+									}
+									if (super.peek(0).tok == Semicolon) junk();
+								default:
+							}
+							var result = rewriter(params);
+							if (result != null) insertedTokens.push(new Token(result, t.pos));
+							return peek(0);
+						}
+					default:
+				}
+			}
+			
+			if (insharp) t;
+			else switch t {
 				case { tok: CommentLine(_) | Comment(_) }:
 					junk();
 					peek(0);
-				case t: t;
+				// "Preprocessor" business //
+				case { tok: Sharp("ifdef" | "ifndef") }:
+					junk();
+					switch peek(0) {
+						case { tok: Const(CIdent(t)) } :
+							junk();
+							currentConditionals.push(t);
+						default: "Missing ifdef identifier";
+					}
+					peek(0);
+				case { tok: Sharp("else") } :
+					junk();
+					skipIf++;
+					currentConditionals.push("");
+					skipUntilEndIf();
+					peek(0);
+				case { tok: Sharp("if" | "elif") }:
+					junk();
+					insharp = true;
+					var e = parseConstantExpression();
+					insharp = false;
+					var res = resolveConstantExpression(e);
+					if (!res) {
+						skipIf++;
+						currentConditionals.push(""+e.expr);
+						skipUntilEndIf();
+					}
+					peek(0);
+					/*
+					switch peek(0) {
+						case { tok: Const(CIdent(t)) } :
+							junk();
+							currentConditionals.push(t);
+							if (directives.indexOf(t) == -1) {
+								skipIf++;
+								while (skipIf > 0) {
+									trace(skipIf+" "+super.peek(0));
+									switch super.peek(0) {
+										case { tok: Sharp("if") }:
+											skipIf++;
+										case { tok: Sharp("elif") } :
+											if (skipIf == 1) {
+												skipIf = 0;
+												currentConditionals.pop();
+												break;
+											}
+										case { tok: Sharp("else") } :
+											if (skipIf == 1) {
+												skipIf = 0;
+												currentConditionals.pop();
+												currentConditionals.push("");
+											}
+										case { tok: Sharp("endif") }:
+											skipIf--;
+											if (skipIf == 0) {
+												currentConditionals.pop();
+											}
+										case { tok: Eof }:
+											throw "Eof while looking for endif at level: "+skipIf;
+										default:
+									}
+									junk();
+								}
+							}
+						default: "Missing if identifier";
+					}
+					*/
+				case { tok: Sharp("endif") }:
+					junk();
+					currentConditionals.pop();
+					peek(0);
+				case { tok: Define(k, v) }:
+					junk();
+					if (defines.exists(k)) throw "Multiple definitions found: "+k;
+					defines.set(k, v);
+					//trace('DEFINE $k $v');
+					peek(0);
+				case { tok: Sharp("include") }:
+					junk();
+					switch peek(0) {
+						case { tok: Const(CString(t)) }:
+							junk();
+							includes.push(t);
+						default: throw "Missing include string";
+					}
+					peek(0);
+				default: t;
 			}
-		} else super.peek(n);
+		} else {
+			switch t {
+				case { tok: CommentLine(_) | Comment(_) | Define(_, _) | Sharp("endif") }:
+					peek(n+1);
+				case { tok: Sharp("include") } :
+					peek(n+2);
+				case { tok: Sharp("ifdef" | "ifndef" | "if") }:
+					throw "Unsupported peek into macro";
+				default: t;
+			}
+		}
+		//printToken(t);
+		return t;
 	}
 	
 	

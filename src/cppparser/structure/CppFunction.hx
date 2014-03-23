@@ -12,7 +12,8 @@ class CppFunction {
 	public var returnType:CppVar;
 	public var parameters:Array<CppVar> = [];
 	public var initList:Map<String, String> = new Map<String, String>();
-	public var operatorOverload:Binop;
+	public var operatorOverload:Null<Binop>;
+	public var castOverload:Bool = false;
 	
 	public var pureVirtual:Bool = false;
 	

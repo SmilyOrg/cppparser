@@ -15,7 +15,7 @@ class CppVar {
 	public var reference:Bool = false;
 	public var pointer:Bool = false;
 	
-	public var defaultValue:TokenDef;
+	public var defaultValue:Null<Expr>;
 	
 	public function new() {
 		
