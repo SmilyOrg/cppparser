@@ -43,7 +43,8 @@ class CppLexer extends Lexer implements RuleBuilder {
 		"" => mk(lexer, Eof),
 		
 		// Whitespace
-		"[\r\n\t ]" => lexer.token(tok),
+		"[\r\n]+" => mk(lexer, Newline),
+		"[\t ]+" => lexer.token(tok),
 		
 		backslashSkip => lexer.token(tok),
 		
@@ -148,6 +149,7 @@ class CppLexer extends Lexer implements RuleBuilder {
 		
 		"#" + ident => {
 			var name = lexer.current.substr(1);
+			/*
 			if (name == "define") {
 				var pmin = lexer.curPos();
 				var id = lexer.token(tok);
@@ -163,8 +165,9 @@ class CppLexer extends Lexer implements RuleBuilder {
 				token.pos.pmin = pmin.pmin;
 				token;
 			} else {
+			*/
 				mk(lexer, Sharp(name));
-			}
+			//}
 		},
 		ident => {
 			var kwd = keywords.get(lexer.current);

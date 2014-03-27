@@ -1,6 +1,7 @@
 package cppparser;
 
 import byte.ByteData;
+import cppparser.CppParser.Define;
 #if cppplog
 import com.furusystems.slf4hx.loggers.Logger;
 import com.furusystems.slf4hx.Logging;
@@ -13,6 +14,18 @@ import cppparser.structure.CppClass;
 import cppparser.structure.CppFunction;
 import cppparser.structure.CppVar;
 import cppparser.structure.DataAST;
+
+/*
+enum Define {
+	DExpr(e:Expr);
+	DExprArgs(e:Expr, args:Array<Expr>);
+}
+*/
+
+typedef Define = {
+	e:Expr,
+	args:Array<Expr>
+}
 
 class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 	
@@ -29,12 +42,13 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 	public var initialDefines:Map<String, String>;
 	public var macroRewrite:Map<String, Array<String> -> TokenDef>;
 	
-	var currentConditionals:Array<String>;
-	var skipIf:Int = 0;
+	var currentConditionals:Array<Bool>;
+	//var skipIf:Int = 0;
 	var insharp:Bool;
 	var insertedTokens:Array<Token>;
 	
-	public var defines:Map<String, String>;
+	//public var defines:Map<String, String>;
+	public var defines:Map<String, Define>;
 	public var includes:Array<String>;
 	public var typedefs:Array<String>;
 	public var enums:Array<String>;
@@ -50,10 +64,12 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 	public function reset() {
 		currentConditionals = [];
 		insertedTokens = [];
-		skipIf = 0;
+		//skipIf = 0;
 		insharp = false;
 		
-		defines = new Map<String, String>();
+		//defines = new Map<String, String>();
+		//defines = new Map<String, Expr>();
+		defines = new Map<String, Define>();
 		includes = [];
 		typedefs = [];
 		enums = [];
@@ -70,7 +86,8 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		
 		reset();
 		
-		if (initialDefines != null) for (key in initialDefines.keys()) defines.set(key, initialDefines.get(key));
+		// TODO fix
+		//if (initialDefines != null) for (key in initialDefines.keys()) defines.set(key, initialDefines.get(key));
 		
 		var stop = false;
 		while (!stop) {
@@ -121,12 +138,14 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		// yay!
 	}
 	
+	/*
 	function preparse() {
 		//if (checkIdentSkip()) return true;
 		if (parsePreproc()) return true;
 		if (rewriteMacros()) return true;
 		return false;
 	}
+	*/
 	
 	function checkIdentSkip() {
 		var tok = peek(0).tok;
@@ -188,6 +207,7 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 	}
 	
 	// Obsolete
+	/*
 	function parsePreproc() {
 		if (skipIf > 0) {
 			switch stream {
@@ -204,10 +224,10 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 			case [ { tok: Sharp("ifdef" | "ifndef") }, { tok: Const(CIdent(t)) } ]:
 				currentConditionals.push(t);
 			case [ { tok: Sharp("if") }, { tok: Const(CIdent(t)) } ]:
-				//if (directives.indexOf(t) == -1) {
-					//trace("Skipping "+t);
-					//skipIf++;
-				//}
+				if (directives.indexOf(t) == -1) {
+					trace("Skipping "+t);
+					skipIf++;
+				}
 				currentConditionals.push(t);
 			case [ { tok: Sharp("endif") } ]:
 				currentConditionals.pop();
@@ -221,6 +241,7 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		}
 		return true;
 	}
+	*/
 	
 	inline function printToken(token:Token) {
 		#if cppplog
@@ -470,45 +491,76 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 		return expr();
 	}
 	
-	function resolveConstantExpression(e:Expr):Dynamic {
-		// TODO fix
-		return switch e.expr {
-			case EConst(CIdent("true")): true;
-			case EConst(CIdent("false")): false;
-			case EConst(CInt(s)): s;
+	public function resolveDefine(def:Define):Int {
+		return resolveConstantExpression(def.e);
+	}
+	
+	function resolveConstantExpression(e:Expr, args:Map<String, Expr> = null):Int {
+		if (e == null) return 0;
+		/*
+		trace("RESOLVE");
+		trace(e.expr);
+		if (args != null) {
+			trace("ARGS");
+			trace(args);
+		}
+		//*/
+		var r = switch e.expr {
+			case EConst(CInt(s)): Std.parseInt(s);
 			case EConst(CIdent(ident)):
-				/*
-				switch (defines.get(ident)) {
-					case "1": true;
-					case "0": false;
-					case null: false;
-					case _: throw "Unsupported define: "+ident;
+				var def = defines.get(ident);
+				//resolveConstantExpression(def.e, def.args);
+				var expr;
+				if (def == null) {
+					expr = args.get(ident);
+					if (expr == null) throw "Identifier not defined or an argument: "+ident;
+				} else {
+					expr = def.e;
 				}
-				*/
-				defines.get(ident);
-			case ECall({ expr: EConst(CIdent("defined")) }, [{ expr: EConst(CIdent(ident)) }]): defines.exists(ident);
+				resolveConstantExpression(expr, args);
+			case ECall({ expr: EConst(CIdent("defined")) }, [{ expr: EConst(CIdent(ident)) }]): defines.exists(ident) ? 1 : 0;
+			case ECall({ expr: EConst(CIdent(ident)) }, params):
+				//trace("CALL "+ident+" "+params);
+				var def = defines.get(ident);
+				if (args == null) {
+					args = new Map<String, Expr>();
+				} else {
+					var orig = args;
+					args = new Map<String, Expr>();
+					for (key in orig.keys()) args[key] = orig[key];
+				}
+				for (i in 0...def.args.length) {
+					var arg = def.args[i].expr;
+					switch arg {
+						case EConst(CIdent(argName)):
+							args[argName] = params[i];
+						default: throw "Invalid arg type: "+arg;
+					}
+				}
+				//trace("ARGS "+args);
+				resolveConstantExpression(def.e, args);
 			case EBinop(op, a, b):
 				switch op {
-					case OpBoolOr: resolveConstantExpression(a) || resolveConstantExpression(b);
-					case OpBoolAnd: resolveConstantExpression(a) && resolveConstantExpression(b);
-					case OpEq: resolveConstantExpression(a) == resolveConstantExpression(b);
+					case OpBoolOr: (resolveConstantExpression(a, args) > 0 || resolveConstantExpression(b, args) > 0) ? 1 : 0;
+					case OpBoolAnd: (resolveConstantExpression(a, args) > 0 && resolveConstantExpression(b, args) > 0) ? 1 : 0;
+					case OpEq: (resolveConstantExpression(a, args) == resolveConstantExpression(b, args)) ? 1 : 0;
 					default: throw "Unsupported binary op: "+op;
 				}
 			case EUnop(op, postFix, e):
 				switch op {
-					case OpNot: return !resolveConstantExpression(e);
+					case OpNot: return resolveConstantExpression(e, args) == 0 ? 1 : 0;
 					default: throw "Unsupported unary op: "+op;
 				}
 			default: throw "Unsupported constant expression: "+e;
 		}
+		trace("RESOLVE "+e.expr+" = "+r);
+		return r;
 	}
 	
 	function expr():Expr {
 		return switch stream {
 			case [ { tok: Unop(op), pos: p }, e = expr() ]: makeUnop(op, e, p);
 			case [ { tok: Const(c), pos: p } ]: exprNext({ expr: EConst(c), pos: p });
-			case [ { tok: Kwd(KwdTrue), pos: p } ]: exprNext({ expr: EConst(CIdent("true")), pos: p });
-			case [ { tok: Kwd(KwdFalse), pos: p } ]: exprNext({ expr: EConst(CIdent("false")), pos: p });
 			case [ { tok: POpen, pos: pa }, e = expr(), { tok: PClose, pos: pb } ]: exprNext({ expr: EParenthesis(e), pos: Position.union(pa, pb) });
 		}
 		 //| Kwd(KwdTrue | KwdFalse) | Binop(_) } :
@@ -687,28 +739,31 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 	}
 	
 	function skipUntilEndIf() {
+		var skipIf = 1;
 		while (skipIf > 0) {
-			//trace(skipIf+" "+super.peek(0));
+		//while (currentConditionals.length >= enterLen) {
 			switch super.peek(0) {
 				case { tok: Sharp("if") }:
 					skipIf++;
 				case { tok: Sharp("elif") } :
 					if (skipIf == 1) {
-						skipIf = 0;
-						currentConditionals.pop();
+						//skipIf = 0;
+						//currentConditionals.pop();
 						break;
 					}
 				case { tok: Sharp("else") } :
 					if (skipIf == 1) {
-						skipIf = 0;
-						currentConditionals.pop();
-						currentConditionals.push("");
+						//skipIf = 0;
+						//currentConditionals.pop();
+						break;
+						//currentConditionals.push(false);
 					}
 				case { tok: Sharp("endif") }:
 					skipIf--;
-					if (skipIf == 0) {
-						currentConditionals.pop();
-					}
+					if (skipIf == 0) break;
+					//if (skipIf == 0) {
+						//currentConditionals.pop();
+					//}
 				case { tok: Eof }:
 					throw "Eof while looking for endif at level: "+skipIf;
 				default:
@@ -764,35 +819,54 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 			
 			if (insharp) t;
 			else switch t {
-				case { tok: CommentLine(_) | Comment(_) }:
+				case { tok: CommentLine(_) | Comment(_) | Newline }:
 					junk();
 					peek(0);
 				// "Preprocessor" business //
-				case { tok: Sharp("ifdef" | "ifndef") }:
+				case { tok: Sharp(s = "ifdef" | "ifndef") }:
 					junk();
 					switch peek(0) {
-						case { tok: Const(CIdent(t)) } :
+						case { tok: Const(c = CIdent(_)) } :
 							junk();
-							currentConditionals.push(t);
+							var res = resolveConstantExpression({ expr: ECall({ expr: EConst(CIdent("defined")), pos: null }, [{ expr: EConst(c), pos: null }]), pos: null });
+							if (s == "ifndef") res = 1-res;
+							if (res == 0) {
+								currentConditionals.push(false);
+								skipUntilEndIf();
+							} else {
+								currentConditionals.push(true);
+							}
 						default: "Missing ifdef identifier";
 					}
 					peek(0);
-				case { tok: Sharp("else") } :
+				//case { tok: Sharp("else") } :
+					//junk();
+					//skipIf++;
+					//currentConditionals.push(false);
+					//skipUntilEndIf();
+					//peek(0);
+				case { tok: Sharp("endif") }:
 					junk();
-					skipIf++;
-					currentConditionals.push("");
-					skipUntilEndIf();
+					currentConditionals.pop();
 					peek(0);
-				case { tok: Sharp("if" | "elif") }:
+				case { tok: Sharp(s = "if" | "elif" | "else") }:
 					junk();
-					insharp = true;
-					var e = parseConstantExpression();
-					insharp = false;
-					var res = resolveConstantExpression(e);
-					if (!res) {
-						skipIf++;
-						currentConditionals.push(""+e.expr);
+					var e = null;
+					if (s != "else") {
+						insharp = true;
+						e = parseConstantExpression();
+						insharp = false;
+					}
+					var res =
+						s == "if" || (s == "elif" && !currentConditionals[currentConditionals.length-1]) ? resolveConstantExpression(e) :
+						s == "else" && !currentConditionals[currentConditionals.length-1] ? 1 : 0
+					;
+					if (res == 0) {
+						if (s == "if") currentConditionals.push(false);
 						skipUntilEndIf();
+					} else {
+						if (s != "if") currentConditionals.pop();
+						currentConditionals.push(true);
 					}
 					peek(0);
 					/*
@@ -834,15 +908,35 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 						default: "Missing if identifier";
 					}
 					*/
-				case { tok: Sharp("endif") }:
-					junk();
-					currentConditionals.pop();
-					peek(0);
+					/*
 				case { tok: Define(k, v) }:
 					junk();
 					if (defines.exists(k)) throw "Multiple definitions found: "+k;
 					defines.set(k, v);
 					//trace('DEFINE $k $v');
+					peek(0);
+					*/
+				case { tok: Sharp("define") }:
+					junk();
+					insharp = true;
+					var defName = switch stream {
+						case [ { tok: Const(CIdent(ident)) } ]:
+							ident;
+						default: unexpected();
+					}
+					var args = null;
+					var expression = switch stream {
+						case [{ tok: Newline }]:
+							{ expr: EConst(CInt("1")), pos: null }
+						case [ { tok: POpen }, a = parseCallParams(), { tok: PClose }, e = parseConstantExpression(), { tok: Newline | Eof } ]:
+							args = a;
+							e;
+						case [ e = parseConstantExpression(), { tok: Newline | Eof } ]:
+							e;
+						case _: unexpected();
+					}
+					defines.set(defName, { e: expression, args: args });
+					insharp = false;
 					peek(0);
 				case { tok: Sharp("include") }:
 					junk();
@@ -857,7 +951,7 @@ class CppParser extends Parser<CppLexer, Token> implements ParserBuilder {
 			}
 		} else {
 			switch t {
-				case { tok: CommentLine(_) | Comment(_) | Define(_, _) | Sharp("endif") }:
+				case { tok: CommentLine(_) | Comment(_) | Sharp("endif") }:
 					peek(n+1);
 				case { tok: Sharp("include") } :
 					peek(n+2);

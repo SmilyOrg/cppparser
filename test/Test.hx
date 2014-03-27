@@ -1,18 +1,24 @@
 package ;
 import byte.ByteData;
 import cppparser.CppParser;
+import haxe.unit.TestCase;
+import haxe.unit.TestRunner;
 import sys.io.File;
+import tests.DefineTest;
 
 import cppparser.Data;
 
 class Test {
 	
 	static function main() {
-		new Test();
+		//new Test();
+		var r = new TestRunner();
+		r.add(new DefineTest());
+		Sys.exit(r.run() ? 0 : 1);
 	}
 	
+	/*
 	public function new() {
-		
 		var testFile = "../test/listbase.h";
 		
 		var nullReturn = function(params:Array<String>) { return null; };
@@ -42,7 +48,7 @@ class Test {
 		
 		trace("CLASSES");
 		trace(parser.classes.join("\n\n\n\n\n"));
-		
 	}
+	*/
 	
 }

@@ -111,6 +111,8 @@ enum TokenDef {
 	POpen;
 	PClose;
 	
+	Newline;
+	
 	Eof;
 }
 
@@ -203,6 +205,8 @@ class TokenDefPrinter {
 			case BrClose: "}";
 			case POpen: "(";
 			case PClose: ")";
+			
+			case Newline: "\n";
 			
 			case Eof: "<eof>";
 		}
