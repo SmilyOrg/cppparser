@@ -153,8 +153,6 @@ class DefineTest extends ParserTest {
 		
 	}
 	
-	//*/
-	
 	public function testArguments() {
 		var p = getParsed("
 			#define A 1
@@ -178,6 +176,15 @@ class DefineTest extends ParserTest {
 		assertEquals(1, p.resolveDefine(p.defines.get("DTT")));
 		assertEquals(1, p.resolveDefine(p.defines.get("DN")));
 		assertEquals(0, p.resolveDefine(p.defines.get("E")));
+	}
+	
+	//*/
+	
+	public function testParentheses() {
+		var p = getParsed("
+			#define A 0 || (1)
+		");
+		assertEquals(1, p.resolveDefine(p.defines.get("A")));
 	}
 	
 }

@@ -34,6 +34,7 @@ enum Keyword {
 	KwdConst;
 	KwdVirtual;
 	KwdExtern;
+	KwdFriend;
 	
 	KwdSigned;
 	KwdUnsigned;
@@ -87,7 +88,9 @@ enum TokenDef {
 	Const(c:Constant);
 	
 	Sharp(s:String);
-	Define(key:String, value:String);
+	//Define(key:String, value:String);
+	Pragma(s:String);
+	Include(file:String, system:Bool);
 	
 	Unop(op:Unop);
 	Binop(op:Binop);
@@ -182,7 +185,10 @@ class TokenDefPrinter {
 			case Const(CString(s)): '"$s"';
 			
 			case Sharp(s): '#$s';
-			case Define(k, v): '#define $k $v';
+			//case Define(k, v): '#define $k $v';
+			case Pragma(s): '#pragma $s';
+			case Include(s, false): '#include "$s"';
+			case Include(s, true): '#include <$s>';
 			
 			case Unop(op): printUnop(op);
 			case Binop(op): printBinop(op);

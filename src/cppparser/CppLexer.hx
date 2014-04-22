@@ -147,8 +147,24 @@ class CppLexer extends Lexer implements RuleBuilder {
 			token;
 		},
 		
-		"#" + ident => {
-			var name = lexer.current.substr(1);
+		"#" + "[\t ]*" + ident + "[\t ]*" => {
+			var name = lexer.current.substr(1).trim();
+			switch (name) {
+				case "include":
+					var pmin = lexer.curPos();
+					var token = lexer.token(includeFile);
+					token.pos.pmin = pmin.pmin;
+					token;
+				case "pragma":
+					var pmin = lexer.curPos();
+					buf = new StringBuf();
+					var pmax = lexer.token(pragma);
+					var token = mk(lexer, Pragma(buf.toString().trim()));
+					token.pos.pmin = pmin.pmin;
+					token;
+				default:
+					mk(lexer, Sharp(name));
+			}
 			/*
 			if (name == "define") {
 				var pmin = lexer.curPos();
@@ -165,9 +181,8 @@ class CppLexer extends Lexer implements RuleBuilder {
 				token.pos.pmin = pmin.pmin;
 				token;
 			} else {
+			}
 			*/
-				mk(lexer, Sharp(name));
-			//}
 		},
 		ident => {
 			var kwd = keywords.get(lexer.current);
@@ -180,6 +195,58 @@ class CppLexer extends Lexer implements RuleBuilder {
 		idtype => mk(lexer, Const(CIdent(lexer.current))),
 	];
 	
+	public static var includeFile = @:rule [
+		'"' => {
+			buf = new StringBuf();
+			var pmin = lexer.curPos();
+			var pmax = try lexer.token(includeFileDouble) catch (e:Eof) throw new LexerError(UnterminatedString, pmin);
+			var token = mk(lexer, Include(buf.toString(), false));
+			token.pos.pmin = pmin.pmin;
+			token;
+		},
+		"<" => {
+			buf = new StringBuf();
+			var pmin = lexer.curPos();
+			var pmax = try lexer.token(includeFileBracket) catch (e:Eof) throw new LexerError(UnterminatedString, pmin);
+			var token = mk(lexer, Include(buf.toString(), true));
+			token.pos.pmin = pmin.pmin;
+			token;
+		}
+	];
+	public static var includeFileDouble = @:rule [
+		'"' => lexer.curPos().pmax,
+		"[^\\\\\"]+" => {
+			buf.add(lexer.current);
+			lexer.token(includeFileDouble);
+		}
+	];
+	public static var includeFileBracket = @:rule [
+		'>' => lexer.curPos().pmax,
+		"[^\\\\\"]+" => {
+			buf.add(lexer.current);
+			lexer.token(includeFileBracket);
+		}
+	];
+	
+	public static var pragma = @:rule [
+		backslashSkip => {
+			lexer.token(pragma);
+		},
+		"//" => {
+			// TODO cleaner?
+			lexer.pos -= 2;
+			lexer.curPos().pmax;
+		},
+		"\r?\n" => {
+			lexer.curPos().pmax;
+		},
+		"[^\r\n]" => {
+			buf.add(lexer.current);
+			lexer.token(pragma);
+		}
+	];
+	
+	/*
 	public static var define = @:rule [
 		backslashSkip => {
 			lexer.token(define);
@@ -197,6 +264,7 @@ class CppLexer extends Lexer implements RuleBuilder {
 			lexer.token(define);
 		}
 	];
+	*/
 	
 	public static var stringDouble = @:rule [
 		"\\\\\\\\" => {

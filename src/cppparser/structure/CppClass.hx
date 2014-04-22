@@ -8,7 +8,7 @@ class CppClass {
 	public var idents:Array<Token> = [];
 	public var name:String;
 	
-	public var inheritance:Null<{ visibility:Visibility, name:String }>;
+	public var inheritance:Array<{ visibility:Visibility, type:CppType }> = [];
 	
 	public var constructors:Array<CppFunction> = [];
 	public var destructors:Array<CppFunction> = [];
@@ -23,7 +23,7 @@ class CppClass {
 		return {
 			'[Class $name ' +
 			"[" + idents.join(", ") + "]" +
-			(inheritance == null ? "" : ' inherits being ${inheritance.visibility} from ${inheritance.name} ') +
+			[for (inh in inheritance) ' inherits being ${inh.visibility} from ${inh.type} '].join("\n\t") +
 			"\n\t" +
 			" constructors " +
 			"\n\t" +

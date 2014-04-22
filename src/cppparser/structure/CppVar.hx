@@ -9,7 +9,7 @@ class CppVar {
 	
 	public var keywords:Array<Keyword> = [];
 	
-	public var type:String = null;
+	public var type:CppType = null;
 	public var name:String;
 	
 	public var reference:Bool = false;
